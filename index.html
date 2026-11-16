@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tangkap Ikan Sebanyak Mungkin!</title>
+
+<style>
+/* =====================================================================
+   KELOMPOK 1: CSS (TAMPILAN / DESAIN)
+   Fungsi: mengatur warna, tata letak, tombol, papan skor (HUD),
+           layar pop-up (menu, jeda, selesai), dan layar Toko.
+   Desain dibuat datar (flat): tanpa bayangan cahaya, tanpa efek kaca.
+   ===================================================================== */
+
+:root{
+  --latar-kartu: #0b2a44;   /* warna kartu skor (solid) */
+  --aksen: #4fc3f7;         /* biru untuk pemain */
+  --emas: #ffd54a;          /* kuning untuk ikan emas, koin, dan judul */
+  --bahaya: #ff6b6b;        /* merah untuk bot dan peringatan */
+  --teks: #eaf6ff;
+}
+
+/* Reset gaya bawaan browser */
+*{ box-sizing:border-box; margin:0; padding:0; }
+
+/* Halaman utama: pusatkan semua elemen */
+body{
+  min-height:100vh;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:14px; padding:16px;
+  font-family:'Segoe UI', Tahoma, Arial, sans-serif;
+  color:var(--teks);
+  background:#0b2a44;
+  user-select:none;
+}
+
+/* Judul game */
+h1{
+  font-size:clamp(18px, 4vw, 30px);
+  letter-spacing:2px;
+  text-align:center;
+}
+
+/* Kontainer canvas (area permainan) */
+.wrap{ position:relative; width:min(100%, 900px); }
+
+/* Canvas dengan bingkai garis tipis */
+canvas{
+  width:100%; height:auto; display:block;
+  border-radius:10px;
+  border:2px solid #1d5a80;
+  touch-action:none;               /* agar sentuhan di HP tidak menggulir halaman */
+  cursor:crosshair;
+}
+
+/* Papan skor (HUD) dengan 6 kartu sejajar */
+.hud{
+  display:grid; grid-template-columns:repeat(6, 1fr); gap:8px;
+  width:min(100%, 900px);
+}
+.kartu{
+  background:var(--latar-kartu);
+  border:1px solid #1d5a80;
+  border-radius:10px; padding:6px 8px; text-align:center;
+}
+.kartu small{
+  display:block; opacity:.75; font-size:11px;
+  text-transform:uppercase; letter-spacing:1px;
+}
+.kartu b{ font-size:20px; }
+.kartu .pemain{ color:var(--aksen); }
+.kartu .bot{ color:var(--bahaya); }
+.kartu .emas{ color:var(--emas); }
+
+/* Waktu berkedip merah saat 10 detik terakhir */
+.kartu.kritis b{ color:var(--bahaya); animation: kedip .5s steps(2, start) infinite; }
+@keyframes kedip { to { visibility:hidden; } }
+
+/* Layar pop-up di atas canvas (menu, jeda, selesai, dan toko) */
+.overlay{
+  position:absolute; inset:0; border-radius:10px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:12px; padding:20px; text-align:center;
+  background:rgba(7, 26, 44, .94);
+}
+.overlay h2{ font-size:clamp(20px, 4vw, 34px); color:var(--emas); }
+.overlay p{ font-size:clamp(14px, 2.2vw, 18px); line-height:1.5; max-width:560px; }
+
+/* Kelas bantu untuk menyembunyikan elemen */
+.hidden{ display:none !important; }
+
+/* Daftar upgrade di layar Toko */
+.daftar-toko{
+  display:flex; flex-direction:column; gap:8px;
+  width:min(100%, 580px); max-height:55%; overflow:auto;
+}
+.item-toko{
+  display:flex; justify-content:space-between; align-items:center; gap:10px;
+  background:#123d5c; border:1px solid #1d5a80; border-radius:8px;
+  padding:10px 12px; text-align:left;
+}
+.item-toko span{ font-size:13px; opacity:.85; }
+
+/* Gaya tombol: warna datar, tanpa gradasi dan tanpa bayangan */
+.btns{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; }
+.btn{
+  font-size:15px; font-weight:600; color:#032033; cursor:pointer;
+  padding:10px 18px; border:none; border-radius:8px;
+  background:#4fc3f7;
+}
+.btn:hover{ background:#7fd6fb; }
+.btn:disabled{ opacity:.4; cursor:not-allowed; background:#4fc3f7; }
+.btn.utama{ background:var(--emas); }
+.btn.utama:hover{ background:#ffe27a; }
+.btn.kecil{ font-size:13px; padding:8px 14px; }
+
+.petunjuk{ font-size:13px; opacity:.8; text-align:center; max-width:900px; }
+
+/* Layar kecil (HP): kartu skor jadi 3 kolom */
+@media (max-width:700px){
+  .hud{ grid-template-columns:repeat(3, 1fr); }
+  .kartu b{ font-size:17px; }
+  .item-toko{ flex-direction:column; align-items:stretch; text-align:center; }
+}
+</style>
+</head>
+
+<body>
+
+<h1>🐟 TANGKAP IKAN SEBANYAK MUNGKIN! 🐟</h1>
+
+<!-- Papan skor (HUD) -->
+<div class="hud">
+  <div class="kartu"><small>Level</small><b id="level" class="emas">1</b></div>
+  <div class="kartu" id="kartuWaktu"><small>Waktu</small><b id="waktu">03:00</b></div>
+  <div class="kartu"><small>Skor Kamu</small><b id="skorPemain" class="pemain">0</b></div>
+  <div class="kartu"><small>Skor Bot</small><b id="skorBot" class="bot">0</b></div>
+  <div class="kartu"><small>Koin 🪙</small><b id="koin" class="emas">0</b></div>
+  <div class="kartu"><small>High Score</small><b id="skorTertinggi">0</b></div>
+</div>
+
+<!-- Area permainan -->
+<div class="wrap">
+  <canvas id="game" width="900" height="600"></canvas>
+
+  <!-- Pop-up menu / jeda / selesai -->
+  <div id="overlay" class="overlay">
+    <h2 id="overlayJudul"></h2>
+    <p id="overlayPesan"></p>
+    <div class="btns">
+      <button id="btnOverlay" class="btn utama"></button>
+      <button id="btnOverlay2" class="btn hidden">🛒 Toko</button>
+    </div>
+  </div>
+
+  <!-- Layar Toko upgrade -->
+  <div id="toko" class="overlay hidden">
+    <h2>🛒 Toko Upgrade</h2>
+    <p id="tokoKoin"></p>
+    <div id="daftarToko" class="daftar-toko"></div>
+    <div class="btns">
+      <button id="btnTutupToko" class="btn utama">⬅ Kembali</button>
+      <button id="btnResetProgres" class="btn kecil">Reset Progres</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tombol kontrol -->
+<div class="btns">
+  <button id="btnMulai" class="btn">▶ Mulai</button>
+  <button id="btnJeda" class="btn">⏸ Jeda</button>
+  <button id="btnUlang" class="btn">🔄 Ulang</button>
+  <button id="btnToko" class="btn">🛒 Toko</button>
+  <button id="btnSuara" class="btn">🔊 Suara: Aktif</button>
+</div>
+
+<p class="petunjuk">
+  Kontrol: gerakkan <b>mouse</b> / sentuh layar, atau <b>panah / WASD</b> &nbsp;·&nbsp;
+  <b>P</b> atau <b>Spasi</b> = jeda &nbsp;·&nbsp; <b>Enter</b> = mulai &nbsp;·&nbsp; <b>Esc</b> = tutup toko
+</p>
+
+<script>
+/* =====================================================================
+   KELOMPOK 2: PENGATURAN DASAR GAME
+   Fungsi: menyimpan konstanta (waktu, jumlah ikan, jenis ikan, daftar
+           upgrade toko) dan mengambil elemen HTML yang akan dikendalikan.
+   ===================================================================== */
+
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const W = canvas.width;    // lebar area permainan (900)
+const H = canvas.height;   // tinggi area permainan (600)
+
+const WAKTU_MAIN = 180;    // lama permainan dalam detik (3 menit)
+const JUMLAH_IKAN = 14;    // jumlah ikan yang selalu ada di layar
+
+// Daftar jenis ikan: ukuran, warna, poin, kecepatan, dan peluang muncul
+const JENIS_IKAN = [
+  { nama:'Kecil',  r:13, warna:'#ffb347', gelap:'#c96f10', poin:1,  kecepatan:1.8, peluang:0.50 },
+  { nama:'Sedang', r:20, warna:'#4fc3f7', gelap:'#1565c0', poin:3,  kecepatan:1.3, peluang:0.30 },
+  { nama:'Besar',  r:30, warna:'#ba68c8', gelap:'#6a1b9a', poin:5,  kecepatan:0.8, peluang:0.15 },
+  { nama:'Emas',   r:18, warna:'#ffd54a', gelap:'#b8860b', poin:10, kecepatan:2.4, peluang:0.05 }
+];
+
+// Daftar upgrade di Toko. biaya(lvl) menghitung harga untuk level berikutnya.
+const DAFTAR_UPGRADE = [
+  { id:'jaring', nama:'Ukuran Jaring',     ket:'Jaring lebih besar, lebih mudah menangkap ikan.', maks:5, biaya: l => 30 * (l + 1) },
+  { id:'gerak',  nama:'Kecepatan Jaring',  ket:'Jaring bergerak lebih cepat mengikuti kursor.',   maks:5, biaya: l => 25 * (l + 1) },
+  { id:'magnet', nama:'Magnet Ikan',       ket:'Menarik ikan yang berada di sekitar jaring.',     maks:3, biaya: l => 50 * (l + 1) },
+  { id:'waktu',  nama:'Tambah Waktu',      ket:'Menambah 10 detik pada setiap ronde.',            maks:3, biaya: l => 60 * (l + 1) }
+];
+
+// Elemen HTML yang sering dipakai
+const el = {
+  level:          document.getElementById('level'),
+  waktu:          document.getElementById('waktu'),
+  kartuWaktu:     document.getElementById('kartuWaktu'),
+  skorPemain:     document.getElementById('skorPemain'),
+  skorBot:        document.getElementById('skorBot'),
+  koin:           document.getElementById('koin'),
+  skorTertinggi:  document.getElementById('skorTertinggi'),
+  overlay:        document.getElementById('overlay'),
+  overlayJudul:   document.getElementById('overlayJudul'),
+  overlayPesan:   document.getElementById('overlayPesan'),
+  btnOverlay:     document.getElementById('btnOverlay'),
+  btnOverlay2:    document.getElementById('btnOverlay2'),
+  toko:           document.getElementById('toko'),
+  tokoKoin:       document.getElementById('tokoKoin'),
+  daftarToko:     document.getElementById('daftarToko'),
+  btnTutupToko:   document.getElementById('btnTutupToko'),
+  btnResetProgres:document.getElementById('btnResetProgres'),
+  btnMulai:       document.getElementById('btnMulai'),
+  btnJeda:        document.getElementById('btnJeda'),
+  btnUlang:       document.getElementById('btnUlang'),
+  btnToko:        document.getElementById('btnToko'),
+  btnSuara:       document.getElementById('btnSuara')
+};
+
+/* =====================================================================
+   KELOMPOK 3: DATA PERMANEN (LEVEL, KOIN, UPGRADE, HIGH SCORE)
+   Fungsi: menyimpan progres pemain di localStorage agar tetap ada
+           setelah browser ditutup.
+   ===================================================================== */
+
+let level      = Number(localStorage.getItem('ikanLevel') || 1);
+let koin       = Number(localStorage.getItem('ikanKoin') || 0);
+let skorTertinggi = Number(localStorage.getItem('ikanHighScore') || 0);
+let upgrade    = JSON.parse(localStorage.getItem('ikanUpgrade') || 'null')
+                 || { jaring:0, gerak:0, magnet:0, waktu:0 };
+let suaraAktif = true;
+let audioCtx   = null;     // dibuat saat pemain pertama kali menekan tombol
+
+// Menyimpan semua data permanen ke localStorage
+function simpanData(){
+  localStorage.setItem('ikanLevel', String(level));
+  localStorage.setItem('ikanKoin', String(koin));
+  localStorage.setItem('ikanHighScore', String(skorTertinggi));
+  localStorage.setItem('ikanUpgrade', JSON.stringify(upgrade));
+}
+
+/* =====================================================================
+   KELOMPOK 4: VARIABEL STATUS (STATE) PERMAINAN
+   Fungsi: menyimpan kondisi ronde saat ini: skor, sisa waktu, posisi
+           jaring pemain dan bot, daftar ikan, dan efek.
+   ===================================================================== */
+
+let status = 'menu';        // 'menu' | 'main' | 'jeda' | 'selesai' | 'toko'
+let sebelumToko = 'menu';   // status sebelum membuka Toko (untuk kembali)
+let overlayTerakhir = null; // isi pop-up terakhir (dipakai saat kembali dari Toko)
+let levelDimainkan = level; // level untuk ronde yang sedang berjalan
+let sisaWaktu = WAKTU_MAIN;
+let skorPemain = 0;
+let skorBot = 0;
+let detikTerakhir = -1;     // untuk bunyi tik-tok di 10 detik terakhir
+
+let ikan = [];              // daftar ikan yang sedang berenang
+let partikel = [];          // percikan saat ikan tertangkap
+let teksMelayang = [];      // tulisan "+poin" yang naik ke atas
+let gelembung = [];         // gelembung air dekoratif
+let lastTs = 0;             // waktu frame sebelumnya
+
+// Jaring pemain: nilainya diisi ulang dari upgrade di terapkanStatPemain()
+const pemain = { x: W/2, y: H/2, r: 48, kecepatan: 8, magnetJarak: 0, magnetKuat: 0 };
+
+// Jaring bot: nilainya diisi ulang sesuai level di terapkanStatBot()
+const bot = { x: W*0.2, y: H*0.3, r: 40, kecepatan: 2, target: null,
+              waktuCari: 0, waktuRetarget: 0.7, peluangSalah: 0.2,
+              magnetJarak: 0, magnetKuat: 0 };
+
+// Status input
+const mouse = { x: W/2, y: H/2 };
+let mouseAktif = false;
+const tombolDitekan = { kiri:false, kanan:false, atas:false, bawah:false };
+
+/* =====================================================================
+   KELOMPOK 5: STATISTIK PEMAIN & BOT (BERDASARKAN UPGRADE & LEVEL)
+   Fungsi: menghitung kemampuan jaring pemain dari upgrade yang dibeli,
+           dan kemampuan bot dari level. Bot makin kuat di level tinggi.
+   ===================================================================== */
+
+// Kemampuan pemain: dihitung dari upgrade di Toko
+function statPemain(){
+  return {
+    r: 48 + upgrade.jaring * 8,                              // ukuran jaring
+    kecepatan: 8 + upgrade.gerak * 0.8,                      // kecepatan gerak
+    magnetJarak: upgrade.magnet > 0 ? 60 + upgrade.magnet * 40 : 0,
+    magnetKuat: 0.6 + upgrade.magnet * 0.3                   // seberapa kuat menarik ikan
+  };
+}
+
+// Kemampuan bot: naik setiap level
+//   - kecepatan naik
+//   - peluang salah pilih turun (makin pintar)
+//   - waktu berpikir (retarget) makin cepat
+//   - mulai level 3 bot punya magnet
+function statBot(L){
+  return {
+    r: 40 + L * 2,
+    kecepatan: Math.min(2.0 + L * 0.25, 5),
+    peluangSalah: Math.max(0.02, 0.2 - L * 0.02),
+    waktuRetarget: Math.max(0.2, 0.7 - L * 0.05),
+    magnetJarak: L >= 3 ? 60 + L * 5 : 0,
+    magnetKuat: Math.min(0.2 + L * 0.05, 1)
+  };
+}
+
+// Menerapkan statistik ke jaring pemain dan bot di awal ronde
+function terapkanStatPemain(){ Object.assign(pemain, statPemain()); }
+function terapkanStatBot(){ Object.assign(bot, statBot(levelDimainkan)); }
+
+/* =====================================================================
+   KELOMPOK 6: SUARA (WEB AUDIO)
+   Fungsi: membuat bunyi sederhana tanpa file audio eksternal.
+   ===================================================================== */
+
+// Membunyikan nada dengan frekuensi, durasi, dan jenis gelombang tertentu
+function bunyi(frekuensi, durasi = 0.12, jenis = 'sine', volume = 0.15){
+  if(!suaraAktif) return;
+  if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const osilator = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osilator.type = jenis;
+  osilator.frequency.value = frekuensi;
+  gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + durasi);
+  osilator.connect(gain);
+  gain.connect(audioCtx.destination);
+  osilator.start();
+  osilator.stop(audioCtx.currentTime + durasi);
+}
+
+/* =====================================================================
+   KELOMPOK 7: PEMBUATAN & GERAKAN IKAN
+   Fungsi: memunculkan ikan dengan jenis acak, menggerakkannya, dan
+           membuatnya memantul di batas atas/bawah serta muncul lagi
+           dari sisi lain layar.
+   ===================================================================== */
+
+// Memilih jenis ikan berdasarkan peluang
+function pilihJenisIkan(){
+  const r = Math.random();
+  let akumulasi = 0;
+  for(const jenis of JENIS_IKAN){
+    akumulasi += jenis.peluang;
+    if(r < akumulasi) return jenis;
+  }
+  return JENIS_IKAN[0];
+}
+
+// Membuat satu ikan baru di posisi acak
+function buatIkan(){
+  const jenis = pilihJenisIkan();
+  const arah = Math.random() < 0.5 ? 1 : -1;
+  return {
+    jenis,
+    x: Math.random() * W,
+    y: 90 + Math.random() * (H - 170),
+    vx: arah * jenis.kecepatan * (0.6 + Math.random() * 0.8),
+    vy: (Math.random() - 0.5) * 0.6,
+    fasaGoyang: Math.random() * Math.PI * 2
+  };
+}
+
+// Menggerakkan semua ikan setiap frame
+function updateIkan(dtF){
+  for(const f of ikan){
+    f.fasaGoyang += 0.05 * dtF;
+    f.x += f.vx * dtF;
+    f.y += (f.vy + Math.sin(f.fasaGoyang) * 0.4) * dtF;
+
+    if(f.y < 70)     f.vy = Math.abs(f.vy) + 0.2;
+    if(f.y > H - 90) f.vy = -Math.abs(f.vy) - 0.2;
+
+    if(f.x < -60) f.x = W + 60;
+    if(f.x > W + 60) f.x = -60;
+  }
+}
+
+// Memastikan jumlah ikan selalu sesuai JUMLAH_IKAN
+function isiIkan(){
+  while(ikan.length < JUMLAH_IKAN) ikan.push(buatIkan());
+}
+
+// Magnet: menarik ikan yang berada dalam jarak tertentu ke arah jaring
+function magnetkan(jaring, jarak, kuat, dtF){
+  if(!jarak) return;
+  for(const f of ikan){
+    const dx = jaring.x - f.x, dy = jaring.y - f.y;
+    const d = Math.hypot(dx, dy);
+    if(d > 0 && d < jarak){
+      f.x += (dx / d) * kuat * dtF;
+      f.y += (dy / d) * kuat * dtF;
+    }
+  }
+}
+
+/* =====================================================================
+   KELOMPOK 8: GERAKAN PEMAIN & KECERDASAN BOT
+   Fungsi: mengatur jaring pemain (keyboard/mouse) dan logika bot yang
+           memilih ikan paling menguntungkan.
+   ===================================================================== */
+
+// Menggerakkan jaring pemain berdasarkan tombol atau posisi mouse
+function updatePemain(dtF){
+  let dx = 0, dy = 0;
+  if(tombolDitekan.kiri)  dx -= 1;
+  if(tombolDitekan.kanan) dx += 1;
+  if(tombolDitekan.atas)  dy -= 1;
+  if(tombolDitekan.bawah) dy += 1;
+
+  if(dx || dy){
+    const panjang = Math.hypot(dx, dy);
+    pemain.x += (dx / panjang) * pemain.kecepatan * dtF;
+    pemain.y += (dy / panjang) * pemain.kecepatan * dtF;
+    mouseAktif = false;
+  } else if(mouseAktif){
+    const k = 1 - Math.pow(0.85, dtF);
+    pemain.x += (mouse.x - pemain.x) * k;
+    pemain.y += (mouse.y - pemain.y) * k;
+  }
+
+  pemain.x = Math.max(pemain.r, Math.min(W - pemain.r, pemain.x));
+  pemain.y = Math.max(pemain.r * 0.5, Math.min(H - 30, pemain.y));
+}
+
+// Mencari ikan terbaik untuk bot: jarak kecil dan poin besar lebih disukai
+function cariTargetBot(){
+  // Kadang bot salah memilih, tergantung level (level tinggi jarang salah)
+  if(Math.random() < bot.peluangSalah){
+    return ikan[Math.floor(Math.random() * ikan.length)];
+  }
+  let terbaik = null, nilaiTerbaik = Infinity;
+  for(const f of ikan){
+    const jarak = Math.hypot(f.x - bot.x, f.y - bot.y);
+    const nilai = jarak / f.jenis.poin;
+    if(nilai < nilaiTerbaik){
+      nilaiTerbaik = nilai;
+      terbaik = f;
+    }
+  }
+  return terbaik;
+}
+
+// Menggerakkan bot menuju target
+function updateBot(dtF, dtS){
+  bot.waktuCari -= dtS;
+
+  if(!bot.target || !ikan.includes(bot.target) || bot.waktuCari <= 0){
+    bot.target = cariTargetBot();
+    bot.waktuCari = bot.waktuRetarget;
+  }
+
+  const tx = bot.target ? bot.target.x : W / 2;
+  const ty = bot.target ? bot.target.y : H / 2;
+
+  const dx = tx - bot.x, dy = ty - bot.y;
+  const jarak = Math.hypot(dx, dy) || 1;
+  const langkah = Math.min(bot.kecepatan * dtF, jarak);
+  bot.x += (dx / jarak) * langkah;
+  bot.y += (dy / jarak) * langkah;
+
+  bot.x = Math.max(bot.r, Math.min(W - bot.r, bot.x));
+  bot.y = Math.max(bot.r * 0.5, Math.min(H - 30, bot.y));
+}
+
+/* =====================================================================
+   KELOMPOK 9: MENANGKAP IKAN, KOIN, & EFEK VISUAL
+   Fungsi: mendeteksi ikan yang masuk jaring, menambah skor dan koin
+           (koin hanya untuk pemain), serta membuat percikan dan
+           tulisan "+poin".
+   ===================================================================== */
+
+// Membuat percikan dan tulisan poin saat ikan tertangkap
+function buatEfek(x, y, warna, teks){
+  for(let i = 0; i < 8; i++){
+    partikel.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 6,
+      vy: (Math.random() - 0.8) * 5,
+      hidup: 1, warna
+    });
+  }
+  teksMelayang.push({ x, y: y - 10, teks, warna, hidup: 1 });
+}
+
+// Mengecek apakah ada ikan yang masuk jaring (pemain atau bot)
+function cekTangkap(jaring, pemilik){
+  for(let i = ikan.length - 1; i >= 0; i--){
+    const f = ikan[i];
+    const jarak = Math.hypot(f.x - jaring.x, f.y - jaring.y);
+
+    if(jarak < jaring.r + f.jenis.r * 0.6){
+      ikan.splice(i, 1);
+      const poin = f.jenis.poin;
+
+      if(pemilik === 'pemain'){
+        skorPemain += poin;
+        koin += poin;                 // 1 poin = 1 koin
+        simpanData();
+        buatEfek(f.x, f.y, '#4fc3f7', '+' + poin);
+      } else {
+        skorBot += poin;
+        buatEfek(f.x, f.y, '#ff6b6b', '+' + poin);
+      }
+
+      if(f.jenis.nama === 'Emas') bunyi(1200, 0.3, 'triangle', 0.2);
+      else bunyi(500 + poin * 40, 0.1, 'sine', 0.12);
+    }
+  }
+  isiIkan();
+}
+
+// Menggerakkan partikel dan tulisan poin, lalu menghapus yang sudah habis
+function updateEfek(dtF){
+  for(const p of partikel){
+    p.x += p.vx * dtF; p.y += p.vy * dtF;
+    p.vy += 0.15 * dtF;
+    p.hidup -= 0.03 * dtF;
+  }
+  for(const t of teksMelayang){
+    t.y -= 1.2 * dtF;
+    t.hidup -= 0.02 * dtF;
+  }
+  partikel = partikel.filter(p => p.hidup > 0);
+  teksMelayang = teksMelayang.filter(t => t.hidup > 0);
+}
+
+/* =====================================================================
+   KELOMPOK 10: LATAR BELAKANG (DEKORASI)
+   Fungsi: menggambar laut, pasir, rumput laut, dan gelembung dengan
+           warna datar agar tampilan sederhana dan tidak mengkilap.
+   ===================================================================== */
+
+function buatGelembung(){
+  for(let i = 0; i < 14; i++){
+    gelembung.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      r: 2 + Math.random() * 3,
+      kecepatan: 0.4 + Math.random() * 0.6
+    });
+  }
+}
+
+function updateGelembung(dtF){
+  for(const g of gelembung){
+    g.y -= g.kecepatan * dtF;
+    if(g.y < -10){ g.y = H + 10; g.x = Math.random() * W; }
+  }
+}
+
+function gambarLatar(ts){
+  ctx.fillStyle = '#1b6e9c';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.fillStyle = '#c9a862';
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  ctx.lineTo(0, H - 45);
+  for(let x = 0; x <= W; x += 60){
+    ctx.quadraticCurveTo(x + 30, H - 60 + Math.sin(x) * 8, x + 60, H - 45);
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.lineCap = 'round';
+  for(let i = 0; i < 10; i++){
+    const x = i * 95 + 30;
+    ctx.strokeStyle = '#2a7a55';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.moveTo(x, H - 40);
+    ctx.quadraticCurveTo(
+      x + Math.sin(ts * 0.002 + i) * 25, H - 120,
+      x + Math.sin(ts * 0.0015 + i * 2) * 15, H - 190
+    );
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = 'rgba(255,255,255,.35)';
+  ctx.lineWidth = 1;
+  for(const g of gelembung){
+    ctx.beginPath();
+    ctx.arc(g.x, g.y, g.r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+/* =====================================================================
+   KELOMPOK 11: GAMBAR IKAN
+   Fungsi: menggambar setiap ikan dengan badan, ekor, dan mata dalam
+           warna datar. Ikan yang berenang ke kiri akan dibalik.
+   ===================================================================== */
+
+function gambarIkan(f, ts){
+  const j = f.jenis;
+  const r = j.r;
+
+  ctx.save();
+  ctx.translate(f.x, f.y);
+  if(f.vx < 0) ctx.scale(-1, 1);
+
+  const goyang = Math.sin(ts * 0.01 + f.fasaGoyang) * 0.3;
+  ctx.fillStyle = j.gelap;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.8, 0);
+  ctx.lineTo(-r * 1.6, -r * 0.6 + goyang * r);
+  ctx.lineTo(-r * 1.6,  r * 0.6 + goyang * r);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = j.warna;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r, r * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(r * 0.5, -r * 0.1, r * 0.17, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#012';
+  ctx.beginPath(); ctx.arc(r * 0.56, -r * 0.1, r * 0.08, 0, Math.PI * 2); ctx.fill();
+
+  ctx.restore();
+}
+
+/* =====================================================================
+   KELOMPOK 12: GAMBAR JARING, PARTIKEL, DAN TEKS
+   Fungsi: menggambar jaring pemain & bot (lingkaran berpola jaring),
+           percikan efek, dan tulisan poin.
+   ===================================================================== */
+
+function gambarJaring(jaring, warnaGaris, warnaIsi, label){
+  ctx.save();
+
+  ctx.beginPath();
+  ctx.arc(jaring.x, jaring.y, jaring.r, 0, Math.PI * 2);
+  ctx.fillStyle = warnaIsi;
+  ctx.fill();
+
+  // Pola jaring dipotong (clip) agar hanya tampil di dalam lingkaran
+  ctx.beginPath();
+  ctx.arc(jaring.x, jaring.y, jaring.r, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.strokeStyle = warnaGaris;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 1;
+  for(let i = -jaring.r; i <= jaring.r; i += 12){
+    ctx.beginPath();
+    ctx.moveTo(jaring.x + i, jaring.y - jaring.r);
+    ctx.lineTo(jaring.x + i, jaring.y + jaring.r);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(jaring.x - jaring.r, jaring.y + i);
+    ctx.lineTo(jaring.x + jaring.r, jaring.y + i);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(jaring.x, jaring.y, jaring.r, 0, Math.PI * 2);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = warnaGaris;
+  ctx.setLineDash([8, 6]);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = 'bold 13px Segoe UI, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = warnaGaris;
+  ctx.fillText(label, jaring.x, jaring.y - jaring.r - 8);
+  ctx.restore();
+}
+
+// Menggambar partikel dan teks poin
+function gambarEfek(){
+  for(const p of partikel){
+    ctx.save();
+    ctx.globalAlpha = Math.max(p.hidup, 0);
+    ctx.fillStyle = p.warna;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  for(const t of teksMelayang){
+    ctx.save();
+    ctx.globalAlpha = Math.max(t.hidup, 0);
+    ctx.font = 'bold 20px Segoe UI, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = t.warna;
+    ctx.fillText(t.teks, t.x, t.y);
+    ctx.restore();
+  }
+}
+
+/* =====================================================================
+   KELOMPOK 13: RENDER UTAMA (GAMBAR SATU FRAME)
+   Fungsi: membersihkan layar lalu menggambar latar, ikan, jaring, dan
+           efek sesuai urutan lapisan.
+   ===================================================================== */
+
+function gambarSemua(ts){
+  ctx.clearRect(0, 0, W, H);
+  gambarLatar(ts);
+  for(const f of ikan) gambarIkan(f, ts);
+  gambarJaring(bot,    '#ff6b6b', 'rgba(255,107,107,0.18)', 'BOT Lv ' + levelDimainkan);
+  gambarJaring(pemain, '#4fc3f7', 'rgba(79,195,247,0.18)',  'KAMU');
+  gambarEfek();
+}
+
+/* =====================================================================
+   KELOMPOK 14: HUD, POP-UP, DAN TOKO
+   Fungsi: memperbarui papan skor, menampilkan pop-up menu/jeda/selesai,
+           serta mengatur layar Toko untuk membeli upgrade.
+   ===================================================================== */
+
+function formatWaktu(detik){
+  const m = Math.floor(detik / 60);
+  const s = Math.floor(detik % 60);
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+}
+
+// Memperbarui semua angka di papan skor
+function updateHUD(){
+  el.level.textContent = levelDimainkan;
+  el.waktu.textContent = formatWaktu(Math.ceil(sisaWaktu));
+  el.skorPemain.textContent = skorPemain;
+  el.skorBot.textContent = skorBot;
+  el.koin.textContent = koin;
+  el.skorTertinggi.textContent = skorTertinggi;
+  el.kartuWaktu.classList.toggle('kritis', sisaWaktu <= 10 && status === 'main');
+}
+
+// Menampilkan pop-up. tampilSekunder = true untuk memunculkan tombol Toko.
+function tampilOverlay(judul, pesan, teksTombol, tampilSekunder = false){
+  overlayTerakhir = { judul, pesan, teksTombol, tampilSekunder };
+  el.overlayJudul.textContent = judul;
+  el.overlayPesan.innerHTML = pesan;
+  el.btnOverlay.textContent = teksTombol;
+  el.btnOverlay2.classList.toggle('hidden', !tampilSekunder);
+  el.overlay.classList.remove('hidden');
+}
+
+function sembunyikanOverlay(){
+  el.overlay.classList.add('hidden');
+}
+
+// Tombol utama di pop-up: lanjut jeda atau mulai ronde
+function aksiOverlay(){
+  if(status === 'jeda') togglePause();
+  else mulai();
+}
+
+// Membuka Toko. Jika sedang bermain, permainan dijeda dulu.
+function bukaToko(){
+  if(status === 'toko') return;
+  if(status === 'main') togglePause();
+  sebelumToko = status;
+  status = 'toko';
+  sembunyikanOverlay();
+  renderToko();
+  el.toko.classList.remove('hidden');
+}
+
+// Menutup Toko dan kembali ke pop-up sebelumnya
+function tutupToko(){
+  if(status !== 'toko') return;
+  el.toko.classList.add('hidden');
+  status = sebelumToko;
+  if(overlayTerakhir){
+    const o = overlayTerakhir;
+    tampilOverlay(o.judul, o.pesan, o.teksTombol, o.tampilSekunder);
+  }
+}
+
+// Menggambar daftar upgrade di Toko sesuai koin dan level upgrade
+function renderToko(){
+  el.tokoKoin.textContent = 'Koin kamu: 🪙 ' + koin;
+  el.daftarToko.innerHTML = '';
+
+  for(const u of DAFTAR_UPGRADE){
+    const lvl = upgrade[u.id];
+    const penuh = lvl >= u.maks;
+    const harga = u.biaya(lvl);
+
+    const item = document.createElement('div');
+    item.className = 'item-toko';
+
+    const info = document.createElement('div');
+    info.innerHTML = '<b>' + u.nama + '</b> <small>(Lv ' + lvl + '/' + u.maks + ')</small><br><span>' + u.ket + '</span>';
+
+    const tombol = document.createElement('button');
+    tombol.className = 'btn kecil';
+    tombol.textContent = penuh ? 'MAKS' : 'Beli · 🪙 ' + harga;
+    tombol.disabled = penuh || koin < harga;
+    tombol.addEventListener('click', () => beliUpgrade(u.id));
+
+    item.appendChild(info);
+    item.appendChild(tombol);
+    el.daftarToko.appendChild(item);
+  }
+}
+
+// Membeli satu level upgrade jika koin cukup
+function beliUpgrade(id){
+  const u = DAFTAR_UPGRADE.find(x => x.id === id);
+  const lvl = upgrade[id];
+  const harga = u.biaya(lvl);
+  if(lvl >= u.maks || koin < harga) return;
+
+  koin -= harga;
+  upgrade[id]++;
+  simpanData();
+  renderToko();
+  updateHUD();
+}
+
+// Reset semua progres (level, koin, upgrade)
+function resetProgres(){
+  if(!confirm('Reset semua progres (level, koin, dan upgrade)?')) return;
+  level = 1;
+  koin = 0;
+  upgrade = { jaring:0, gerak:0, magnet:0, waktu:0 };
+  simpanData();
+  renderToko();
+  updateHUD();
+}
+
+/* =====================================================================
+   KELOMPOK 15: ALUR PERMAINAN (START, PAUSE, RESTART, SELESAI)
+   Fungsi: mengatur perpindahan status game, mereset ronde, dan
+           memberi hadiah koin serta naik level jika menang.
+   ===================================================================== */
+
+// Mengatur ulang data ronde ke kondisi awal sesuai level dan upgrade
+function inisialisasi(){
+  levelDimainkan = level;
+  sisaWaktu = WAKTU_MAIN + upgrade.waktu * 10;
+  skorPemain = 0;
+  skorBot = 0;
+  detikTerakhir = -1;
+  ikan = [];
+  partikel = [];
+  teksMelayang = [];
+  isiIkan();
+  terapkanStatPemain();
+  terapkanStatBot();
+  pemain.x = W / 2;
+  pemain.y = H / 2;
+  bot.x = W * 0.2;
+  bot.y = H * 0.3;
+  bot.target = null;
+  updateHUD();
+}
+
+// START / RESTART ronde
+function mulai(){
+  if(!audioCtx && suaraAktif){
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  inisialisasi();
+  status = 'main';
+  sembunyikanOverlay();
+  bunyi(660, 0.15, 'square', 0.1);
+  setTimeout(() => bunyi(880, 0.2, 'square', 0.1), 150);
+}
+
+// PAUSE / LANJUT
+function togglePause(){
+  if(status === 'main'){
+    status = 'jeda';
+    tampilOverlay('⏸ Jeda',
+      'Ronde dihentikan sementara.<br>Tekan <b>Lanjut</b>, <b>P</b>, atau <b>Spasi</b> untuk melanjutkan.',
+      '▶ Lanjut', true);
+  } else if(status === 'jeda'){
+    status = 'main';
+    sembunyikanOverlay();
+  }
+}
+
+// Dipanggil saat waktu habis: hitung hasil, koin bonus, dan naik level
+function selesai(){
+  status = 'selesai';
+  sisaWaktu = 0;
+
+  const menang = skorPemain > skorBot;
+  const bonus = menang ? 50 + levelDimainkan * 25 : 10;
+  koin += bonus;
+
+  if(menang) level = levelDimainkan + 1;   // menang: lanjut ke level berikutnya
+
+  const skorBaru = skorPemain > skorTertinggi;
+  if(skorBaru) skorTertinggi = skorPemain;
+  simpanData();
+
+  let hasil;
+  if(menang)                    hasil = '🏆 Kamu mengalahkan bot!';
+  else if(skorPemain < skorBot) hasil = '🤖 Bot masih lebih hebat. Coba lagi!';
+  else                          hasil = '🤝 Seri!';
+
+  const pesan = hasil + '<br><br>' +
+    'Skor kamu: <b>' + skorPemain + '</b> &nbsp;|&nbsp; Skor bot: <b>' + skorBot + '</b><br>' +
+    'Bonus koin: <b>+' + bonus + ' 🪙</b> &nbsp;|&nbsp; Total koin: <b>' + koin + '</b>' +
+    (skorBaru ? '<br>🎉 <b>High score baru!</b>' : '') +
+    (menang ? '<br>Level berikutnya: <b>' + level + '</b>' : '');
+
+  const teksTombol = menang ? '▶ Level Berikutnya' : '🔄 Coba Lagi';
+  tampilOverlay('⏱ Waktu Habis!', pesan, teksTombol, true);
+  updateHUD();
+
+  [523, 659, 784].forEach((f, i) => setTimeout(() => bunyi(f, 0.2, 'triangle', 0.15), i * 160));
+}
+
+/* =====================================================================
+   KELOMPOK 16: PENGENDALI INPUT (KEYBOARD, MOUSE, SENTUH, TOMBOL)
+   Fungsi: membaca tombol keyboard, posisi mouse, dan sentuhan layar,
+           serta menghubungkan tombol di layar ke fungsi permainan.
+   ===================================================================== */
+
+const peta = {
+  arrowleft:'kiri', a:'kiri', arrowright:'kanan', d:'kanan',
+  arrowup:'atas',   w:'atas', arrowdown:'bawah',  s:'bawah'
+};
+
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+
+  if(peta[k]){
+    tombolDitekan[peta[k]] = true;
+    mouseAktif = false;
+    e.preventDefault();
+  }
+  if(k === ' ' || k === 'p'){
+    e.preventDefault();
+    if(status === 'main' || status === 'jeda') togglePause();
+    else if(status === 'menu' || status === 'selesai') mulai();
+  }
+  if(k === 'enter'){
+    if(status === 'menu' || status === 'selesai') mulai();
+  }
+  if(k === 'escape'){
+    tutupToko();
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  const k = e.key.toLowerCase();
+  if(peta[k]) tombolDitekan[peta[k]] = false;
+});
+
+// Mengubah posisi mouse/sentuh dari koordinat layar ke koordinat canvas
+function posisiCanvas(e){
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (W / rect.width),
+    y: (e.clientY - rect.top)  * (H / rect.height)
+  };
+}
+
+canvas.addEventListener('pointermove', (e) => {
+  const p = posisiCanvas(e);
+  mouse.x = p.x; mouse.y = p.y;
+  mouseAktif = true;
+});
+
+canvas.addEventListener('pointerdown', (e) => {
+  const p = posisiCanvas(e);
+  mouse.x = p.x; mouse.y = p.y;
+  mouseAktif = true;
+});
+
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden && status === 'main') togglePause();
+});
+
+el.btnMulai.addEventListener('click', mulai);
+el.btnUlang.addEventListener('click', mulai);
+el.btnJeda.addEventListener('click', () => {
+  if(status === 'main' || status === 'jeda') togglePause();
+});
+el.btnToko.addEventListener('click', bukaToko);
+el.btnOverlay.addEventListener('click', aksiOverlay);
+el.btnOverlay2.addEventListener('click', bukaToko);
+el.btnTutupToko.addEventListener('click', tutupToko);
+el.btnResetProgres.addEventListener('click', resetProgres);
+el.btnSuara.addEventListener('click', () => {
+  suaraAktif = !suaraAktif;
+  el.btnSuara.textContent = suaraAktif ? '🔊 Suara: Aktif' : '🔇 Suara: Mati';
+});
+
+/* =====================================================================
+   KELOMPOK 17: LOOP UTAMA (GAME LOOP)
+   Fungsi: dipanggil berulang kali oleh browser (sekitar 60x per detik).
+           Menghitung waktu antar-frame, memperbarui logika game jika
+           sedang bermain, lalu menggambar layar.
+   ===================================================================== */
+
+function update(dtF, dtS){
+  sisaWaktu -= dtS;
+
+  const detikSekarang = Math.ceil(sisaWaktu);
+  if(sisaWaktu <= 10 && sisaWaktu > 0 && detikSekarang !== detikTerakhir){
+    detikTerakhir = detikSekarang;
+    bunyi(900, 0.06, 'square', 0.08);
+  }
+
+  updatePemain(dtF);
+  magnetkan(pemain, pemain.magnetJarak, pemain.magnetKuat, dtF);
+  updateIkan(dtF);
+  magnetkan(bot, bot.magnetJarak, bot.magnetKuat, dtF);
+  updateBot(dtF, dtS);
+  cekTangkap(pemain, 'pemain');
+  cekTangkap(bot, 'bot');
+  updateEfek(dtF);
+  updateGelembung(dtF);
+
+  if(sisaWaktu <= 0) selesai();
+  updateHUD();
+}
+
+function loop(ts){
+  if(!lastTs) lastTs = ts;
+  const dtS = Math.min((ts - lastTs) / 1000, 0.1);
+  lastTs = ts;
+  const dtF = dtS * 60;
+
+  if(status === 'main') update(dtF, dtS);
+
+  gambarSemua(ts);
+  requestAnimationFrame(loop);
+}
+
+/* =====================================================================
+   KELOMPOK 18: INISIALISASI AWAL
+   Fungsi: menyiapkan gelembung, data ronde, papan skor, dan pop-up menu
+           saat halaman pertama kali dibuka.
+   ===================================================================== */
+
+buatGelembung();
+inisialisasi();
+updateHUD();
+tampilOverlay(
+  '🐟 Tangkap Ikan!',
+  'Kalahkan bot di <b>Level ' + level + '</b> dalam 3 menit.<br>' +
+  'Kumpulkan <b>koin 🪙</b> dari ikan, lalu beli upgrade di <b>Toko</b>.<br>' +
+  'Setiap level, bot akan makin pintar dan cepat.',
+  '▶ Mulai', true
+);
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
